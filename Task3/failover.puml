@@ -1,0 +1,47 @@
+@startuml GoFuture_Failover
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title GoFuture - C4 аварийного переключения одной региональной пары
+AddElementTag("new", $borderColor="red", $fontColor="red", $legendText="Механизм задания 3")
+AddRelTag("new", $lineColor="red", $textColor="red", $legendText="Связь переключения или репликации")
+
+Person(user, "Пользователь", "Прежний API")
+Container(edge, "Глобальный вход", "HTTPS Load Balancer", "Точка отказа: вход и маршрут\nРезервируемые экземпляры", $tags="new")
+Container(controller, "Контроллер переключения", "Автоматизация failover", "Проверки, прекращение старой записи\nи готовность резерва", $tags="new")
+
+Boundary(region_a, "A - активный владелец данных, три зоны") {
+    Container(app_a, "Booking A", "Python / FastAPI / Kubernetes", "Пример критичного сервиса\nТочки отказа: экземпляр, узел, зона")
+    ContainerDb(db_a, "Booking DB A", "PostgreSQL HA", "Точка отказа: primary\nСинхронный резерв другой зоны", $tags="new")
+    ContainerQueue(kafka_a, "Kafka A", "Apache Kafka", "Точка отказа: брокер\nРеплики по зонам", $tags="new")
+}
+Boundary(region_b, "B - подготовленный резерв данных A") {
+    Container(app_b, "Booking B", "Python / FastAPI / Kubernetes", "Подготовленная емкость\nЗапись A до передачи запрещена", $tags="new")
+    ContainerDb(db_b, "Booking DB A в регионе B", "PostgreSQL replica", "Повышение после прекращения старой записи", $tags="new")
+    ContainerQueue(kafka_b, "Зеркало топиков A", "Apache Kafka", "Проверенные позиции и дедупликация", $tags="new")
+}
+Person(sre, "SRE", "Разбор спорных состояний")
+
+Rel(user, edge, "Запрос", "HTTPS", $tags="new")
+Rel(edge, app_a, "Обычный маршрут", "HTTPS", $tags="new")
+Rel(edge, app_b, "После готовности резерва", "HTTPS", $tags="new")
+Rel(app_a, db_a, "Свои данные", "SQL")
+Rel(app_b, db_b, "После передачи права записи", "SQL", $tags="new")
+BiRel(app_a, kafka_a, "Команды и события")
+BiRel(app_b, kafka_b, "После сверки позиций", "Kafka", $tags="new")
+Rel(db_a, db_b, "Асинхронная репликация", "PostgreSQL", $tags="new")
+Rel(kafka_a, kafka_b, "MirrorMaker 2", "Kafka", $tags="new")
+Rel(controller, app_a, "Проверки и прекращение записи", "Control", $tags="new")
+Rel(controller, db_a, "Блокировка старой записи", "Management API", $tags="new")
+Rel(controller, db_b, "Проверить лаг и повысить", "Management API", $tags="new")
+Rel(controller, app_b, "Проверить восстановление", "Control", $tags="new")
+Rel(controller, edge, "Открыть новый маршрут", "Control", $tags="new")
+Rel(controller, sre, "Небезопасное переключение заблокировано", "Alert", $tags="new")
+
+note as rules
+  Отказ: обнаружить, заблокировать старую запись, проверить резерв, переключить трафик.
+  Без подтверждения блокировки старой записи второй владелец не запускается.
+  Проверка health сама по себе не разрешает запись на резерве.
+  Шаблон применяется ко всем сервисам, потребителям и денежным обработчикам.
+  Собственная нагрузка B и обратное резервирование здесь опущены.
+end note
+@enduml

@@ -1,0 +1,83 @@
+@startuml GoFuture_Multitenancy
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title GoFuture - C2: изоляция партнеров и подключение
+
+Person(operator, "Оператор платформы", "Подключает партнеров")
+Person(partner, "Пользователи партнера", "Администратор и бизнес-роли")
+System_Ext(idp, "Корпоративный IdP", "SSO партнера")
+
+System_Boundary(platform, "GoFuture") {
+    Container(portal, "Портал", "Web", "Заявки, настройки и доступные отчеты")
+    Container(gateway, "API Gateway", "Kong", "Проверка токена, активного tenant и квот")
+    Container(iam, "IAM", "Keycloak", "Realm партнера, роли и SSO")
+    ContainerDb(iamdb, "IAM DB", "PostgreSQL", "Учетные записи и настройки realm")
+    Container(tenants, "Tenant Management", "Python / FastAPI", "Реестр, настройки, шаги подключения\nФоновый обработчик и API метрик партнера")
+    ContainerDb(registry, "Tenant Management DB", "PostgreSQL", "Статусы, регионы, квоты и аудит")
+    Container(provisioning, "Средства развертывания", "Kubernetes API / задания миграции", "Создание ресурсов по шаблонам")
+    Container(secrets, "Секреты", "Хранилище секретов / KMS", "Доступы к БД и интеграциям")
+    Container(booking, "Booking", "Python / FastAPI", "Пример доменного сервиса\nПроверка tenant, роли и объекта")
+    ContainerDb(dbA, "Booking DB партнера A", "PostgreSQL", "Поездки и профили A")
+    ContainerDb(dbB, "Booking DB партнера B", "PostgreSQL", "Поездки и профили B")
+    ContainerQueue(kafka, "Событийная платформа", "Apache Kafka", "Региональные топики, tenant в событиях и ключах")
+    Container(flink, "Потоковая обработка", "Apache Flink", "Спрос и предложение по региону и партнеру")
+    Container(analytics, "Analytics", "Python", "Маршрутизация событий по партнеру")
+    ContainerDb(warehouse, "Аналитические БД партнеров", "ClickHouse", "Раздельные БД и права доступа")
+    Container(bi, "BI", "DataLens", "Отдельные подключения и отчеты партнеров")
+    Container(prometheus, "Метрики", "Prometheus", "Сервисные метрики и агрегаты партнеров")
+    Container(collector, "Сбор телеметрии", "OpenTelemetry Collector", "Контекст партнера в логах и трассах")
+    Container(loki, "Логи", "Loki", "Поиск ошибок и шагов подключения")
+    Container(jaeger, "Трассировки", "Jaeger", "Просмотр трассировок в Jaeger UI")
+    Container(grafana, "Дашборды", "Grafana", "Мониторинг для операторов")
+    Container(alerts, "Алерты", "Alertmanager", "Ошибки подключения, SLO и квоты")
+}
+
+Rel(operator, portal, "1. Заявка на подключение", "HTTPS")
+Rel(partner, portal, "Работа в рамках роли", "HTTPS")
+Rel(portal, iam, "Вход", "OIDC")
+Rel(iam, idp, "Федерация SSO", "OIDC / SAML")
+Rel(iam, iamdb, "Учетные записи", "SQL")
+Rel(portal, gateway, "Запрос с токеном", "HTTPS")
+Rel(gateway, tenants, "Заявки, настройки, метрики", "HTTPS")
+Rel(tenants, registry, "Состояние каждого шага", "SQL")
+Rel(tenants, provisioning, "2. Подготовить ресурсы и миграции", "HTTPS")
+Rel(provisioning, dbA, "БД и учетная запись A", "SQL")
+Rel(provisioning, dbB, "БД и учетная запись B", "SQL")
+Rel(provisioning, secrets, "Записать доступы", "HTTPS")
+Rel(tenants, iam, "3. Realm, роли, IdP", "Admin API")
+Rel(tenants, booking, "4. Конфигурация\n5. Проверки доступа", "HTTPS")
+Rel(tenants, gateway, "6. Активировать tenant и квоты", "Admin API")
+Rel(gateway, booking, "Запросы активного партнера", "HTTPS")
+Rel(booking, secrets, "Учетные данные своего домена", "HTTPS")
+Rel(booking, dbA, "Проверенный контекст A", "SQL")
+Rel(booking, dbB, "Проверенный контекст B", "SQL")
+BiRel(booking, kafka, "События и команды с tenant_id")
+Rel(kafka, flink, "Поездки, координаты и доступность", "Kafka")
+Rel(flink, kafka, "Сигналы и рекомендации по партнеру", "Kafka")
+Rel(kafka, analytics, "События партнеров")
+Rel(analytics, warehouse, "Запись в БД нужного партнера", "SQL")
+Rel(bi, warehouse, "Только разрешенная БД", "SQL")
+Rel(partner, bi, "Отчеты своего партнера", "HTTPS / SSO")
+Rel(prometheus, booking, "Метрики сервиса", "HTTP")
+Rel(prometheus, tenants, "Статусы и агрегаты", "HTTP")
+Rel(booking, collector, "Логи и spans", "OTLP")
+Rel(tenants, collector, "Ошибки и шаги подключения", "OTLP")
+Rel(collector, loki, "Логи", "OTLP / HTTP")
+Rel(collector, jaeger, "Трассировки", "OTLP")
+Rel(tenants, prometheus, "Разрешенные агрегаты для портала", "HTTP")
+Rel(grafana, prometheus, "Метрики", "HTTP")
+Rel(grafana, loki, "Поиск логов", "HTTP")
+Rel(prometheus, alerts, "Срабатывания правил", "HTTP")
+Rel(alerts, operator, "Уведомления")
+Rel(operator, grafana, "Технический мониторинг", "HTTPS / SSO")
+Rel(operator, jaeger, "Поиск трассировок", "HTTPS / SSO")
+
+note as scope
+  Booking иллюстрирует изоляцию всех доменных сервисов, а не объединяет их.
+  Каждый домен имеет отдельную БД и доступы для каждого партнера.
+  Проверки шага 5 охватывают IAM и домены, включая запрет чужих данных.
+  Redis, геоиндексы и остальные домены опущены для читаемости.
+  Региональная защита и резервирование сохраняются из задания 3.
+  Реестр партнера и IAM изменяются только в его домашнем логическом регионе.
+end note
+@enduml

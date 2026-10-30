@@ -1,0 +1,44 @@
+@startuml GoFuture_Data_Migration
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title GoFuture - перенос данных одного домена, пример Booking
+LAYOUT_LEFT_RIGHT()
+skinparam nodesep 40
+skinparam ranksep 45
+
+Container(monolith, "Монолит", "Django", "Владелец записи до переключения")
+ContainerDb(source, "Legacy DB", "PostgreSQL", "Исходные данные домена")
+Container(cdc, "Debezium", "Kafka Connect", "Согласованный снимок\nи изменения с позиции WAL")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "Отдельные технические топики CDC")
+Container(loader, "Загрузчик", "Python", "Запись порциями и сверка\nна контрольной позиции")
+ContainerDb(target, "Booking DB", "PostgreSQL", "Копия до переключения\nОсновная БД после переключения")
+Container(service, "Booking", "Python / FastAPI", "Владелец записи после переключения")
+
+Rel(monolith, source, "Запись до передачи", "SQL")
+Rel(source, cdc, "Снимок / WAL", "PG replication")
+Rel(cdc, kafka, "CDC", "Kafka protocol")
+Rel(kafka, loader, "CDC домена", "Kafka protocol")
+Rel(loader, target, "Загрузка и сверка", "SQL")
+Rel(service, target, "Запись после передачи", "SQL")
+
+note bottom of loader
+  Сохраняем ID, порядок изменений и удаления.
+  Повтор загрузки не создает дубликатов.
+  CDC не запускает платежи и уведомления.
+end note
+
+note bottom of target
+  Передача выбранной группы данных:
+  1. Закрыть старую запись и завершить транзакции.
+  2. Догнать CDC до конечной позиции и сверить данные.
+  3. Отключить CDC группы и передать запись сервису.
+  У сущности всегда один владелец записи.
+  Откат после новых записей - обратный перенос и сверка.
+end note
+
+note bottom of monolith
+  Старые процессы могут завершаться в монолите.
+  Новые создаются в сервисе, маршрут закреплен за ID.
+  Особенности каждого домена описаны в ADR-005.
+end note
+@enduml

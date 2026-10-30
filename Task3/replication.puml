@@ -1,0 +1,34 @@
+@startuml GoFuture_Replication
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title GoFuture - репликация данных одного владельца
+AddElementTag("new", $borderColor="red", $fontColor="red", $legendText="Региональное резервирование")
+AddRelTag("new", $lineColor="red", $textColor="red", $legendText="Репликация задания 3")
+
+Boundary(primary_region, "Регион A - пример Сингапур") {
+    ContainerDb(primary, "БД сервиса - primary", "PostgreSQL", "Запись только владельцем\nБизнес-данные, Saga и outbox")
+    ContainerDb(standby, "HA-резерв в другой зоне", "PostgreSQL", "Резерв подтвержденных транзакций", $tags="new")
+    ContainerQueue(kafka_a, "Kafka A", "Apache Kafka", "Три реплики по зонам\nИсходные региональные топики", $tags="new")
+    Container(mirror, "Межрегиональное копирование", "MirrorMaker 2", "Только разрешенные исходные топики\nи позиции потребителей", $tags="new")
+}
+Boundary(backup_region, "Регион B - пример Джакарта") {
+    ContainerDb(dr, "DR-реплика БД региона A", "PostgreSQL", "Только чтение до переключения", $tags="new")
+    ContainerQueue(kafka_b, "Kafka B - зеркало A", "Apache Kafka", "Отделено от собственных топиков B", $tags="new")
+    ContainerDb(backups, "Резервные копии", "Object Storage", "Копии PostgreSQL и архив WAL\nРазрешенное размещение", $tags="new")
+}
+
+Rel(primary, standby, "Синхронная репликация", "PostgreSQL", $tags="new")
+Rel(primary, dr, "Асинхронная репликация", "PostgreSQL", $tags="new")
+Rel(primary, backups, "Резервные копии и WAL", "HTTPS", $tags="new")
+Rel(kafka_a, mirror, "Чтение исходных топиков", "Kafka", $tags="new")
+Rel(mirror, kafka_b, "Асинхронное зеркало", "Kafka", $tags="new")
+
+note as rules
+  Шаблон повторяется для каждой БД, включая IAM.
+  B обслуживает свои данные и копирует их в A отдельным потоком, без слияния primary.
+  Та же модель применяется к паре Сан-Паулу - Сантьяго.
+  После отказа согласуются БД, outbox и позиции Kafka, возможна повторная доставка.
+  Redis и геоиндекс восстанавливаются, аналитика догоняет события.
+  Межрегиональная передача допускается только по правилам комплаенса.
+end note
+@enduml
