@@ -1,0 +1,76 @@
+@startuml GoFuture_C2_Security
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title GoFuture - C2 защиты регионального развертывания
+AddElementTag("new", $borderColor="red", $fontColor="red", $legendText="Добавлено или изменено в задании 3")
+AddRelTag("new", $lineColor="red", $textColor="red", $legendText="Новая защищенная связь")
+
+Container(passenger_app, "Пассажирское приложение", "Mobile", "Заказ поездки")
+Container(driver_app, "Водительское приложение", "Mobile", "Заказы и координаты")
+Container(portal, "Корпоративный портал", "Web", "Поездки и счета")
+Container(admin, "Админ-панель", "Web", "Управление выплатами")
+Container(edge, "Глобальный HTTPS-вход", "HTTPS Load Balancer + WAF", "DDoS-защита\nи региональная маршрутизация", $tags="new")
+
+System_Boundary(region, "Один из четырех географических регионов") {
+    Boundary(private_net, "Закрытая VPC: Firewall и NetworkPolicy", $tags="new") {
+        Container(gateway, "API Gateway", "Kong", "Проверка доступа и маршрут\nк владельцу операции")
+        Container(adapter, "Legacy API Adapter", "Python / FastAPI", "Сохранение клиентских контрактов")
+        Container(iam, "IAM", "Keycloak", "Региональные учетные записи и роли")
+        Container(booking, "Booking", "Python / FastAPI", "Поездки и оркестрация Saga")
+        Container(drivers, "Driver", "Python / FastAPI", "Доступность и резерв")
+        Container(geo, "Geography", "Python / FastAPI", "Координаты и маршруты")
+        Container(pricing, "Pricing", "Python / FastAPI", "Котировки и цены")
+        Container(payments, "Payments", "Python / FastAPI", "Платежи и счета")
+        Container(fraud, "Fraud", "Python / FastAPI", "Обязательные проверки")
+        Container(payouts, "Payouts", "Python / FastAPI", "Начисления и выплаты")
+        Container(notify, "Notification", "Python / FastAPI", "Уведомления")
+        Container(analytics, "Analytics", "Python / Spark / Flink", "Аналитические данные")
+        ContainerQueue(kafka, "Kafka", "Apache Kafka", "Региональные события и команды")
+        ContainerDb(booking_db, "Booking DB", "PostgreSQL", "Пример собственной БД сервиса")
+    }
+    System_Ext(keys, "Секреты и ключи", "Хранилище секретов / KMS", $tags="new")
+}
+System_Ext(providers, "Разрешенные внешние API", "Платежи, банки, карты, push")
+
+Rel(passenger_app, edge, "Поездки", "HTTPS", $tags="new")
+Rel(driver_app, edge, "Заказы и координаты", "HTTPS", $tags="new")
+Rel(portal, edge, "Поездки и счета", "HTTPS", $tags="new")
+Rel(admin, edge, "Выплаты", "HTTPS", $tags="new")
+Rel(edge, gateway, "Только через защищенный вход", "HTTPS", $tags="new")
+Rel(gateway, iam, "Аутентификация", "OIDC / HTTPS")
+Rel(gateway, adapter, "Прежние контракты", "HTTPS")
+Rel(adapter, booking, "Поездки", "HTTPS")
+Rel(adapter, drivers, "Водители", "HTTPS")
+Rel(adapter, geo, "Координаты", "HTTPS")
+Rel(adapter, pricing, "Котировки", "HTTPS")
+Rel(adapter, payments, "Платежи и счета", "HTTPS")
+Rel(adapter, payouts, "Выплаты", "HTTPS")
+Rel(adapter, notify, "Устройства", "HTTPS")
+Rel(booking, pricing, "Котировка", "HTTPS")
+Rel(booking, geo, "Кандидаты", "HTTPS")
+Rel(payments, fraud, "Проверка платежа", "HTTPS")
+BiRel(booking, kafka, "События и команды Saga")
+BiRel(drivers, kafka, "Команды и результаты")
+BiRel(payments, kafka, "Команды и результаты")
+BiRel(fraud, kafka, "Проверки и решения")
+BiRel(geo, kafka, "Координаты и статусы")
+BiRel(pricing, kafka, "Цены и сигналы")
+BiRel(payouts, kafka, "Начисления и выплаты")
+Rel(kafka, notify, "События")
+Rel(kafka, analytics, "События")
+Rel(booking, booking_db, "Только владельцу, закрытая сеть", "SQL / TLS", $tags="new")
+Rel(booking, keys, "Пример доступа сервиса", "HTTPS", $tags="new")
+Rel(payments, providers, "Платежи, разрешенный исходящий доступ", "HTTPS", $tags="new")
+Rel(payouts, providers, "Банки, разрешенный исходящий доступ", "HTTPS", $tags="new")
+Rel(geo, providers, "Карты, разрешенный исходящий доступ", "HTTPS", $tags="new")
+Rel(notify, providers, "Push, разрешенный исходящий доступ", "HTTPS", $tags="new")
+
+note as scope
+  Красным выделены новые политики, вход и защищенные связи задания 3.
+  Firewall и NetworkPolicy - политики сети, не дополнительные бизнес-сервисы.
+  Все БД доступны только владельцам, Booking DB приведена как пример.
+  Остальные хранилища, Flink и мониторинг сохраняются по заданиям 1-2 и здесь опущены.
+  У каждой региональной копии сервисов несколько экземпляров по зонам.
+  Монолит не входит в финальное региональное развертывание, адаптер старого API сохраняется.
+end note
+@enduml

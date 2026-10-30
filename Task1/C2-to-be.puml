@@ -1,0 +1,113 @@
+@startuml GoFuture_C2
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title GoFuture - C2 To-Be: сервисы и совместимость API
+
+System_Boundary(platform, "GoFuture") {
+    Boundary(clients, "Клиенты") {
+        Container(passenger_app, "Пассажирское приложение", "iOS / Android / Huawei", "Заказ поездок")
+        Container(driver_app, "Водительское приложение", "iOS / Android / Huawei", "Заказы и координаты")
+        Container(portal, "Корпоративный портал", "Web", "Менеджер: поездки и счета")
+        Container(admin, "Админ-панель", "Web", "Бухгалтер: выплаты")
+    }
+    Container(gateway, "API Gateway", "Kong", "Прежний API\nМаршрут к владельцу операции")
+    Container(adapter, "Legacy API Adapter", "Python / FastAPI", "Старые контракты\nповерх новых API")
+    Container(iam, "IAM", "Keycloak", "Учетные записи и роли")
+    ContainerDb(iam_db, "IAM DB", "PostgreSQL", "Учетные записи")
+
+    Container(monolith, "Остаточный монолит", "Django", "Временно: старые процессы\nи адаптеры к сервисам")
+    ContainerDb(legacy_db, "Legacy DB", "PostgreSQL", "Еще не переданные данные")
+
+    Container(booking, "Booking", "Python / FastAPI", "Поездки и умный подбор\nПрофили и корпоративные настройки")
+    ContainerDb(booking_db, "Booking DB", "PostgreSQL", "Поездки и профили")
+    Container(drivers, "Driver", "Python / FastAPI", "Водители, доступность\nи атомарный резерв")
+    ContainerDb(driver_db, "Driver DB", "PostgreSQL", "Водители и резервы")
+    Container(geo, "Geography", "Python / FastAPI", "Координаты, геопоиск\nМаршруты и ETA")
+    ContainerDb(geo_db, "Geography DB", "PostgreSQL", "Геозоны и настройки")
+    ContainerDb(geo_index, "Геоиндекс", "Elasticsearch", "Координаты и статусы")
+    ContainerDb(geo_cache, "Geography Cache", "Redis", "Координаты и маршруты")
+    Container(pricing, "Pricing", "Python / FastAPI", "Котировки и динамическая цена")
+    ContainerDb(pricing_db, "Pricing DB", "PostgreSQL", "Правила и котировки")
+    ContainerDb(pricing_cache, "Pricing Cache", "Redis", "Коэффициенты и кеш")
+    Container(payments, "Payments", "Python / FastAPI", "Платежи, возвраты\nКорпоративные счета")
+    ContainerDb(payments_db, "Payments DB", "PostgreSQL", "Платежи и счета")
+    Container(fraud, "Fraud", "Python / FastAPI", "Обязательные проверки\nФоновый анализ")
+    ContainerDb(fraud_db, "Fraud DB", "PostgreSQL", "Правила и решения")
+    Container(payouts, "Payouts", "Python / FastAPI", "Начисления, балансы\nБанковские выплаты")
+    ContainerDb(payouts_db, "Payouts DB", "PostgreSQL", "Начисления и выплаты")
+    Container(notify, "Notification", "Python / FastAPI", "Доставка push")
+    ContainerDb(notify_db, "Notification DB", "PostgreSQL", "Устройства, шаблоны, доставка")
+    Container(analytics, "Analytics", "Python / Spark / Flink", "Сбор событий, витрины\nДанные для ML и BI")
+    ContainerDb(analytics_db, "Analytics DB", "ClickHouse", "История и витрины")
+    Container(bi, "DataLens", "BI", "Отчеты менеджеру и бухгалтеру")
+    ContainerQueue(kafka, "Kafka", "Apache Kafka", "Доменные события")
+}
+
+System_Ext(maps, "Карты", "Яндекс Карты и локальные провайдеры")
+System_Ext(pay_provider, "Платежные провайдеры", "Яндекс Пэй и локальные провайдеры")
+System_Ext(banks, "Банки", "API выплат")
+System_Ext(push, "Push-провайдеры", "FCM / APNs / Huawei Push Kit")
+
+Rel(passenger_app, gateway, "Поездки", "HTTPS")
+Rel(driver_app, gateway, "Заказы / координаты", "HTTPS")
+Rel(portal, gateway, "Поездки / счета", "HTTPS")
+Rel(admin, gateway, "Выплаты", "HTTPS")
+Rel(gateway, iam, "Токены", "OIDC")
+Rel(iam, iam_db, "Чтение / запись", "SQL")
+Rel(gateway, monolith, "Старые операции\nи сессии", "HTTPS")
+Rel(gateway, adapter, "Старый API", "HTTPS")
+Rel(monolith, adapter, "Выделенные функции", "HTTPS")
+Rel(monolith, legacy_db, "Свои данные", "SQL")
+Rel(adapter, booking, "Поездки", "HTTPS")
+Rel(adapter, drivers, "Водители", "HTTPS")
+Rel(adapter, geo, "Координаты", "HTTPS")
+Rel(adapter, pricing, "Котировки", "HTTPS")
+Rel(adapter, payments, "Платежи / счета", "HTTPS")
+Rel(adapter, payouts, "Балансы / выплаты", "HTTPS")
+Rel(adapter, notify, "Устройства", "HTTPS")
+
+Rel(booking, drivers, "Резерв", "HTTPS")
+Rel(booking, geo, "Кандидаты / ETA", "HTTPS")
+Rel(booking, pricing, "Цена", "HTTPS")
+Rel(booking, payments, "Платеж", "HTTPS")
+Rel(booking, fraud, "Проверка поездки", "HTTPS")
+Rel(payments, fraud, "Проверка платежа", "HTTPS")
+
+Rel(booking, booking_db, "Свои данные", "SQL")
+Rel(drivers, driver_db, "Свои данные", "SQL")
+Rel(geo, geo_db, "Свои данные", "SQL")
+Rel(geo, geo_index, "Геопоиск", "HTTPS")
+Rel(geo, geo_cache, "Кеш", "Redis")
+Rel(pricing, pricing_db, "Свои данные", "SQL")
+Rel(pricing, pricing_cache, "Кеш", "Redis")
+Rel(payments, payments_db, "Свои данные", "SQL")
+Rel(fraud, fraud_db, "Свои данные", "SQL")
+Rel(payouts, payouts_db, "Свои данные", "SQL")
+Rel(notify, notify_db, "Свои данные", "SQL")
+Rel(analytics, analytics_db, "Витрины", "SQL")
+Rel(bi, analytics_db, "Отчеты", "SQL")
+
+BiRel(booking, kafka, "Поездки / результаты")
+Rel(drivers, kafka, "Доступность")
+BiRel(geo, kafka, "Координаты / статусы")
+BiRel(pricing, kafka, "Цены / спрос")
+Rel(payments, kafka, "Платежи / возвраты")
+BiRel(fraud, kafka, "Решения / признаки")
+BiRel(payouts, kafka, "Выплаты / начисления")
+Rel(kafka, notify, "Уведомления")
+Rel(kafka, analytics, "Бизнес-события")
+Rel(monolith, kafka, "События монолита")
+
+Rel(geo, maps, "Маршруты", "HTTPS")
+Rel(payments, pay_provider, "Оплаты / возвраты", "HTTPS")
+Rel(payouts, banks, "Выплаты", "HTTPS")
+Rel(notify, push, "Push", "HTTPS")
+
+note as rules
+  Монолит и Legacy DB показаны для периода перехода и удаляются после миграции.
+  Каждый сервис владеет своей БД, релизом и масштабированием в Kubernetes.
+  Kafka: outbox для транзакционных событий и идемпотентные потребители.
+  Старый API сохраняется, маршрутизация закреплена за владельцем операции.
+  Перенос данных через Debezium - отдельная схема data-migration.puml.
+end note
+@enduml

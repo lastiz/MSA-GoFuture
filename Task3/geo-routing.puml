@@ -1,0 +1,32 @@
+@startuml GoFuture_Geo_Routing
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title GoFuture - геомаршрутизация в четырех регионах
+AddElementTag("new", $borderColor="red", $fontColor="red", $legendText="Изменение задания 3")
+AddRelTag("new", $lineColor="red", $textColor="red", $legendText="Новая связь")
+
+Person(user, "Пользователь", "Пассажир, водитель или сотрудник")
+Container(edge, "Глобальный HTTPS-вход", "HTTPS Load Balancer + WAF", "Ближайшая здоровая точка входа\nDDoS-защита", $tags="new")
+Container(routes, "Региональные Gateway", "Kong", "Реплики маршрутизации\nСтрана, партнер и владелец операции", $tags="new")
+
+System(sg, "Сингапур", "Свои сервисы, БД и Kafka", $tags="new")
+System(jk, "Джакарта", "Свои сервисы, БД и Kafka", $tags="new")
+System(sp, "Сан-Паулу", "Свои сервисы, БД и Kafka", $tags="new")
+System(sc, "Сантьяго", "Свои сервисы, БД и Kafka", $tags="new")
+
+Rel(user, edge, "Прежний адрес API", "HTTPS", $tags="new")
+Rel(edge, routes, "Здоровый региональный вход", "HTTPS", $tags="new")
+Rel(routes, sg, "Допустимые операции ЮВА", "HTTPS", $tags="new")
+Rel(routes, jk, "Допустимые операции Индонезии", "HTTPS", $tags="new")
+Rel(routes, sp, "Допустимые операции Бразилии", "HTTPS", $tags="new")
+Rel(routes, sc, "Допустимые операции Чили", "HTTPS", $tags="new")
+
+note as rules
+  Новая поездка: ближайший здоровый регион из разрешенных для рынка и партнера.
+  Активная операция: только текущий владелец по ID, не случайный ближайший регион.
+  Gateway использует соответствие логического региона и активной площадки.
+  Резервные пары: Сингапур - Джакарта, Сан-Паулу - Сантьяго.
+  Перенаправление на резерв разрешается после готовности данных и передачи владения.
+  Блоки регионов обозначают развертывания, не новые бизнес-сервисы.
+end note
+@enduml

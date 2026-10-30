@@ -1,0 +1,69 @@
+@startuml GoFuture_Event_Platform
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title GoFuture - C2 событийной платформы, один регион
+
+System_Boundary(platform, "GoFuture - региональный контур") {
+    Container(booking, "Booking", "Python / FastAPI", "Оркестратор Saga\nСостояние и команды в своей БД")
+    Container(drivers, "Driver", "Python / FastAPI", "Атомарный резерв\nи доступность")
+    Container(payments, "Payments", "Python / FastAPI", "Авторизация, списания\nи возвраты")
+    Container(fraud, "Fraud", "Python / FastAPI", "Проверки поездок и платежей")
+    Container(geo, "Geography", "Python / FastAPI", "Прием координат\nГеоиндекс и кандидаты")
+    Container(pricing, "Pricing", "Python / FastAPI", "Котировки и правила цены")
+    Container(payouts, "Payouts", "Python / FastAPI", "Начисления и выплаты")
+    Container(notify, "Notification", "Python / FastAPI", "Доставка уведомлений")
+    Container(analytics, "Analytics", "Python / Spark", "История и витрины")
+    ContainerQueue(kafka, "Kafka", "Apache Kafka / JSON", "Региональные топики, ключ сущности\nСобытия, команды, retry и DLQ")
+    Container(flink, "Потоковая обработка", "Apache Flink", "Спрос и предложение\nРекомендации по зонам")
+    ContainerDb(checkpoints, "Хранилище checkpoints", "Object Storage", "Состояние и позиции Flink")
+
+    Boundary(observability, "Наблюдаемость") {
+        Container(exporters, "Экспортеры метрик", "Kafka / JMX / PostgreSQL Exporter", "Отдельные экземпляры\nпри соответствующих источниках")
+        Container(prometheus, "Prometheus", "Metrics", "Метрики и правила алертов")
+        Container(collector, "OpenTelemetry Collector", "OTel", "Логи и трассировки\nSDK внутри приложений")
+        Container(loki, "Loki", "Logs", "Структурированные логи")
+        Container(jaeger, "Jaeger", "Tracing / UI", "Прием и поиск трассировок")
+        Container(grafana, "Grafana", "Dashboards", "Метрики и логи")
+        Container(alertmanager, "Alertmanager", "Alerting", "Группировка и маршрутизация")
+    }
+}
+Person(oncall, "SRE и команды доменов", "Реагирование на инциденты")
+
+Rel(booking, kafka, "BookingCreated, BookingConfirmed, BookingCancelled, RideStarted, RideCompleted, CheckFraud, ReserveDriver, ReleaseDriver, AuthorizePayment, CapturePayment, VoidAuthorization, CommitCorporatePayment", "События / команды")
+Rel(kafka, booking, "Результаты Driver, Payments, Fraud, Успехи, отказы и компенсации, DispatchRecommendationUpdated", "События")
+Rel(kafka, drivers, "ReserveDriver, ReleaseDriver", "Команды")
+Rel(drivers, kafka, "DriverReserved, DriverReservationFailed, DriverReleased, DriverReleaseFailed, DriverAvailabilityChanged", "События")
+Rel(kafka, payments, "AuthorizePayment, CapturePayment, VoidAuthorization, CommitCorporatePayment", "Команды")
+Rel(payments, kafka, "PaymentAuthorized, PaymentAuthorizationFailed, PaymentCaptured, PaymentCaptureFailed, PaymentAuthorizationVoided, PaymentVoidFailed, PaymentRefunded, CorporatePaymentCommitted", "События")
+Rel(kafka, fraud, "CheckFraud, BookingCreated, PaymentCaptured", "Команда / события")
+Rel(fraud, kafka, "FraudCheckPassed, FraudCheckRejected", "События")
+Rel(geo, kafka, "DriverLocationUpdated")
+Rel(kafka, geo, "DriverAvailabilityChanged, DriverLocationUpdated")
+Rel(pricing, kafka, "PriceQuoted, SurgeUpdated")
+Rel(kafka, pricing, "ZoneSupplyDemandUpdated")
+Rel(payouts, kafka, "PayoutAccrued, PayoutAdjusted, PayoutCompleted, PayoutFailed")
+Rel(kafka, payouts, "RideCompleted, PaymentCaptured, PaymentRefunded, CorporatePaymentCommitted")
+Rel(kafka, notify, "BookingConfirmed, PaymentRefunded, PayoutCompleted")
+Rel(kafka, analytics, "Все доменные события")
+Rel(kafka, flink, "BookingCreated, BookingCancelled, BookingConfirmed, DriverLocationUpdated, DriverAvailabilityChanged")
+Rel(flink, kafka, "ZoneSupplyDemandUpdated, DispatchRecommendationUpdated")
+Rel(flink, checkpoints, "Checkpoints", "HTTPS")
+Rel(booking, pricing, "Котировка", "HTTPS")
+Rel(booking, geo, "Кандидаты / ETA", "HTTPS")
+Rel(payments, fraud, "Обязательная проверка", "HTTPS")
+
+Rel(prometheus, exporters, "Сбор метрик", "HTTP")
+Rel(prometheus, booking, "Пример сбора метрик сервиса\nAPI, Saga, outbox", "HTTP")
+Rel(prometheus, flink, "Метрики потока", "HTTP")
+Rel(booking, collector, "Пример телеметрии сервиса\nЛоги и spans", "OTLP")
+Rel(flink, collector, "Логи и spans", "OTLP")
+Rel(collector, loki, "Логи", "OTLP / HTTP")
+Rel(collector, jaeger, "Трассировки", "OTLP")
+Rel(grafana, prometheus, "Запросы метрик", "PromQL")
+Rel(grafana, loki, "Поиск логов", "LogQL")
+Rel(prometheus, alertmanager, "Алерты", "HTTP")
+Rel(alertmanager, oncall, "Оповещения", "Email / Pager")
+Rel(oncall, grafana, "Диагностика", "HTTPS")
+Rel(oncall, jaeger, "Поиск по trace_id", "HTTPS")
+
+@enduml
